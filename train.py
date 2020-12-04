@@ -316,7 +316,6 @@ def main():
         if step >= args.init_steps:
             num_updates = 1
             for _ in range(num_updates):
-                print(step)
                 agent.update(replay_buffer, L, step)
 
         next_obs, reward, done, _ = env.step(action)

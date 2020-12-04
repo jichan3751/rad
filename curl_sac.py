@@ -481,7 +481,7 @@ class RadSacAgent(object):
                 obs, action, reward, next_obs, not_done = replay_buffer.sample_rad(self.augs_funcs)
 
             t1 = time.time()
-            print(f"sampling done in {t1-t0:.3f}sec")
+            # print(f"sampling done in {t1-t0:.3f}sec")
 
         else:
             obs, action, reward, next_obs, not_done = replay_buffer.sample_proprio()
