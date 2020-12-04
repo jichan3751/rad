@@ -19,6 +19,8 @@ from curl_sac import RadSacAgent
 from torchvision import transforms
 import data_augs as rad
 
+from corruptions import Corruptor
+
 def parse_args():
     parser = argparse.ArgumentParser()
     # environment
@@ -75,6 +77,9 @@ def parse_args():
     # data augs
     parser.add_argument('--data_augs', default='crop', type=str)
 
+    # corruption in eval
+    parser.add_argument('--cor_func', default='no_cor', type=str)
+    parser.add_argument('--cor_sev', default=1, type=int)
 
     parser.add_argument('--log_interval', default=100, type=int)
     args = parser.parse_args()
@@ -84,11 +89,14 @@ def parse_args():
 def evaluate(env, agent, video, num_episodes, L, step, args):
     all_ep_rewards = []
 
+    cor = Corruptor(cor_func= args.cor_func, severity = args.cor_sev)
+
     def run_eval_loop(sample_stochastically=True):
         start_time = time.time()
         prefix = 'stochastic_' if sample_stochastically else ''
         for i in range(num_episodes):
             obs = env.reset()
+            obs = cor.corrupt(obs) # added corruption after env
             video.init(enabled=(i == 0))
             done = False
             episode_reward = 0
@@ -107,6 +115,7 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
                     else:
                         action = agent.select_action(obs / 255.)
                 obs, reward, done, _ = env.step(action)
+                obs = cor.corrupt(obs) # added corruption after env
                 video.record(env)
                 episode_reward += reward
 
@@ -221,6 +230,8 @@ def main():
 
     video = VideoRecorder(video_dir if args.save_video else None)
 
+    print("Args:")
+    print(args)
     print("work dir:", args.work_dir)
     os.makedirs(args.work_dir, exist_ok=True)
 
@@ -317,5 +328,11 @@ def main():
 
 if __name__ == '__main__':
     torch.multiprocessing.set_start_method('spawn')
+
+    # For headless machine, avoid 
+    # GLFWError: (65544) b'X11: The DISPLAY environment variable is missing'
+    from pyvirtualdisplay import Display
+    display = Display(visible=0, size=(1400, 900))
+    display.start() #need this to avoid error
 
     main()

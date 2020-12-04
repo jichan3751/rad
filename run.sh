@@ -1,4 +1,7 @@
-python -u train.py \
+export PYTHONUNBUFFERED=1
+export CUDA_VISIBLE_DEVICES=0
+
+python train.py \
     --domain_name cartpole \
     --task_name swingup \
     --encoder_type pixel --work_dir ./tmp \
