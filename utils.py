@@ -8,6 +8,10 @@ import random
 from torch.utils.data import Dataset, DataLoader
 import time
 from skimage.util.shape import view_as_windows
+import multiprocessing
+
+import augmix
+
 
 class eval_mode(object):
     def __init__(self, *models):
@@ -195,6 +199,54 @@ class ReplayBuffer(Dataset):
                 next_obses = func(next_obses)
 
         return obses, actions, rewards, next_obses, not_dones
+
+    def sample_augmix(self):
+        idxs = np.random.randint(
+            0, self.capacity if self.full else self.idx, size=self.batch_size
+        )
+      
+        obses = self.obses[idxs]
+        clean_obses = obses.copy()
+        next_obses = self.next_obses[idxs]
+        clean_next_obses = next_obses.copy()
+
+        clean_obses = torch.as_tensor(clean_obses, device=self.device).float()
+        clean_next_obses = torch.as_tensor(clean_next_obses, device=self.device).float()
+
+
+        obses = obses / 255.
+        next_obses = next_obses / 255.
+        clean_obses = clean_obses / 255.
+        clean_next_obses = clean_next_obses / 255.
+
+        ### augmix ####
+
+        N_PROCS = 0
+        if N_PROCS ==0:
+            obses = [augmix.augment_and_mix(obses[i], seed=i)
+                                    for i in range(len(obses))]
+            next_obses = [augmix.augment_and_mix(next_obses[i], seed=i)
+                                for i in range(len(next_obses))]
+        
+        else: # running in parallel
+            with multiprocessing.Pool(processes=N_PROCS) as pool:
+                args_list = [(obses[i], i) for i in range(len(obses))]
+                obses = pool.starmap(augmix.augment_and_mix2, args_list)
+                args_list = [(next_obses[i], i) for i in range(len(next_obses))]
+                next_obses = pool.starmap(augmix.augment_and_mix2, args_list)
+        
+        ## stacking ##
+        obses = [torch.cat(images, 0) for images in obses]
+        next_obses = [torch.cat(images, 0) for images in next_obses]
+
+        obses = torch.stack(obses).float().to(self.device)
+        next_obses = torch.stack(next_obses).float().to(self.device)
+
+        actions = torch.as_tensor(self.actions[idxs], device=self.device)
+        rewards = torch.as_tensor(self.rewards[idxs], device=self.device)
+        not_dones = torch.as_tensor(self.not_dones[idxs], device=self.device)
+
+        return obses, clean_obses, actions, rewards, next_obses, clean_next_obses, not_dones
 
     def save(self, save_dir):
         if self.idx == self.last_save:

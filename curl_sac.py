@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import copy
 import math
+import time
 
 import utils
 from encoder import make_encoder
@@ -263,6 +264,8 @@ class RadSacAgent(object):
         detach_encoder=False,
         latent_dim=128,
         data_augs = '',
+        augmix=False,
+        jsd_lambda=0,
     ):
         self.device = device
         self.discount = discount
@@ -277,6 +280,8 @@ class RadSacAgent(object):
         self.detach_encoder = detach_encoder
         self.encoder_type = encoder_type
         self.data_augs = data_augs
+        self.augmix = augmix
+        self.jsd_lambda = jsd_lambda
 
         self.augs_funcs = {}
 
@@ -468,7 +473,16 @@ class RadSacAgent(object):
 
     def update(self, replay_buffer, L, step):
         if self.encoder_type == 'pixel':
-            obs, action, reward, next_obs, not_done = replay_buffer.sample_rad(self.augs_funcs)
+            t0 = time.time()
+            if self.augmix:
+                obs, clean_obs, action, reward, next_obs, clean_next_obses, not_done = replay_buffer.sample_augmix()
+                # clean obs will be used later when implementing jsd loss
+            else:
+                obs, action, reward, next_obs, not_done = replay_buffer.sample_rad(self.augs_funcs)
+
+            t1 = time.time()
+            print(f"sampling done in {t1-t0:.3f}sec")
+
         else:
             obs, action, reward, next_obs, not_done = replay_buffer.sample_proprio()
     

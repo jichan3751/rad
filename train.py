@@ -81,6 +81,10 @@ def parse_args():
     parser.add_argument('--cor_func', default='no_cor', type=str)
     parser.add_argument('--cor_sev', default=1, type=int)
 
+    # augmix
+    parser.add_argument('--augmix', action='store_true', help='whether to use augmix')
+    parser.add_argument('--jsd_lambda', default=0, type=float, help='augmix jsd loss lambda')
+
     parser.add_argument('--log_interval', default=100, type=int)
     args = parser.parse_args()
     return args
@@ -183,8 +187,9 @@ def make_agent(obs_shape, action_shape, args, device):
             log_interval=args.log_interval,
             detach_encoder=args.detach_encoder,
             latent_dim=args.latent_dim,
-            data_augs=args.data_augs
-
+            data_augs=args.data_augs,
+            augmix=args.augmix,
+            jsd_lambda=args.jsd_lambda 
         )
     else:
         assert 'agent is not supported: %s' % args.agent
@@ -311,6 +316,7 @@ def main():
         if step >= args.init_steps:
             num_updates = 1
             for _ in range(num_updates):
+                print(step)
                 agent.update(replay_buffer, L, step)
 
         next_obs, reward, done, _ = env.step(action)
