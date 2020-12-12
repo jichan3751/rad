@@ -358,3 +358,167 @@ def center_translate(image, size):
     w1 = (size - w) // 2
     outs[:, h1:h1 + h, w1:w1 + w] = image
     return outs
+
+
+class AugmixReplayBuffer(Dataset):
+    def __init__(self, obs_shape, action_shape, capacity, batch_size, device,image_size=84, 
+                 pre_image_size=84, transform=None, aug_cache = 4, aug_depth=1 , aug_width =1, aug_alpha = 1.0 ):
+        self.capacity = capacity
+        self.batch_size = batch_size
+        self.device = device
+        self.image_size = image_size
+        self.pre_image_size = pre_image_size # for translation
+        self.transform = transform
+        self.aug_cache = aug_cache
+        self.aug_depth = aug_depth
+        self.aug_width = aug_width
+        self.aug_alpha = aug_alpha
+        # the proprioceptive obs is stored as float32, pixels obs as uint8
+        obs_dtype = np.float32 if len(obs_shape) == 1 else np.uint8
+        
+        self.obses = np.empty((capacity, *obs_shape), dtype=obs_dtype)
+        self.next_obses = np.empty((capacity, *obs_shape), dtype=obs_dtype)
+        self.actions = np.empty((capacity, *action_shape), dtype=np.float32)
+        self.rewards = np.empty((capacity, 1), dtype=np.float32)
+        self.not_dones = np.empty((capacity, 1), dtype=np.float32)
+
+        self.aug_obses = [np.empty((capacity, *obs_shape), dtype=obs_dtype) for _ in range(self.aug_cache)]
+        self.aug_next_obses = [np.empty((capacity, *obs_shape), dtype=obs_dtype) for _ in range(self.aug_cache)]
+
+        self.idx = 0
+        self.last_save = 0
+        self.full = False
+
+
+    
+
+    def add(self, obs, action, reward, next_obs, done):
+        # import ipdb; ipdb.set_trace()
+        np.copyto(self.obses[self.idx], obs)
+        np.copyto(self.actions[self.idx], action)
+        np.copyto(self.rewards[self.idx], reward)
+        np.copyto(self.next_obses[self.idx], next_obs)
+        np.copyto(self.not_dones[self.idx], not done)
+
+        def get_augmented_obs(obs):
+            severity = 3
+
+            # apply random augmentation here
+            from augmix import augmentations, apply_op
+            obs = obs /255.
+
+            depth = self.aug_depth
+            c, h, w = obs.shape
+            assert c == 9
+            obs_images = obs.reshape((-1,3,h,w))
+
+            # do we need to apply same operation to all 3 conseqence images?
+            
+            aug_obs_images = []
+            for image in obs_images:
+                image_aug = image.transpose((1,2,0)).copy() # h, w , c
+                d = depth if depth > 0 else np.random.randint(1, 4)
+                op = np.random.choice(augmentations, size=d, replace=True)
+                for i in range(d):
+                    image_aug = apply_op(image_aug, op[i], severity)
+                aug_obs_images.append(image_aug.transpose((2,0,1))) # c h w
+            
+            aug_obs_images = np.stack(aug_obs_images, axis = 0)
+            aug_obs = aug_obs_images.reshape((9,h,w))
+
+            aug_obs = np.clip(aug_obs*255., 0, 255).astype(np.uint8)
+            return aug_obs
+
+        for c_i in range(self.aug_cache):
+            aug_obs = get_augmented_obs(obs)
+            np.copyto(self.aug_obses[c_i][self.idx], aug_obs)
+            aug_next_obs = get_augmented_obs(next_obs)
+            np.copyto(self.aug_next_obses[c_i][self.idx], aug_next_obs)
+
+        self.idx = (self.idx + 1) % self.capacity
+        self.full = self.full or self.idx == 0
+
+        
+        # check 255 ranges of original obs
+
+
+
+    def sample_augmix(self):
+        
+        # augs specified as flags
+        # curl_sac organizes flags into aug funcs
+        # passes aug funcs into sampler
+
+
+        idxs = np.random.randint(
+            0, self.capacity if self.full else self.idx, size=self.batch_size
+        )
+      
+        obses = self.obses[idxs]
+        next_obses = self.next_obses[idxs]
+
+        aug_obses = [ self.aug_obses[c_i][idxs] for c_i in range(self.aug_cache)]
+        aug_next_obses = [ self.aug_next_obses[c_i][idxs] for c_i in range(self.aug_cache)]
+
+        # import ipdb; ipdb.set_trace()
+
+        # augmix mixing part
+        def get_mixed_obs(obses, aug_obses):
+            from augmix import normalize_chw
+
+            width = self.aug_width
+            alpha = self.aug_alpha
+
+            c, h, w = obses[0].shape
+            
+            t00= time.time()
+            
+            obs_images = obses.reshape((-1,3,h,w))
+            aug_obs_images = [ aug_obses1.reshape((-1,3,h,w)) for aug_obses1 in aug_obses]            
+
+            mixed_images = []
+
+            t01= time.time()
+            
+            for i in range(obs_images.shape[0]):
+                ws = np.float32(np.random.dirichlet([alpha] * width))
+                m = np.float32(np.random.beta(alpha, alpha))
+                mix = np.zeros((3, h, w)).astype(float)
+
+                cache_indices = np.random.choice(self.aug_cache, size= width, replace=False)
+
+                for w_i in range(width):
+                    image_aug = aug_obs_images[cache_indices[w_i]][i]
+                    mix = np.add(mix, ws[w_i] * normalize_chw(image_aug), casting='no')
+                
+                image = obs_images[i]
+                mixed = (1-m) * normalize_chw(image) + m * mix
+
+                mixed_images.append(mixed)
+            t02= time.time()
+            mixed_images = np.stack(mixed_images, axis=0)
+            mixed_images = mixed_images.reshape((-1,9,h,w))
+            t03= time.time()
+
+            # print( t01-t00,t02-t01, t03-t02)
+
+            return mixed_images
+    
+        mixed_obses = get_mixed_obs(obses, aug_obses)
+        mixed_next_obses = get_mixed_obs(next_obses, aug_next_obses)
+
+        clean_obses = torch.as_tensor(obses, device=self.device).float()
+        clean_next_obses = torch.as_tensor(next_obses, device=self.device).float()
+        obses = torch.as_tensor(mixed_obses, device=self.device).float()
+        next_obses = torch.as_tensor(mixed_next_obses, device=self.device).float()
+
+        actions = torch.as_tensor(self.actions[idxs], device=self.device)
+        rewards = torch.as_tensor(self.rewards[idxs], device=self.device)
+        not_dones = torch.as_tensor(self.not_dones[idxs], device=self.device)
+
+        obses = obses / 255.
+        clean_obses = clean_obses / 255.
+        next_obses = next_obses / 255.
+        clean_next_obses = clean_next_obses / 255.
+        
+        return obses, clean_obses, actions, rewards, next_obses,clean_next_obses, not_dones

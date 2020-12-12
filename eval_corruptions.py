@@ -281,7 +281,11 @@ def main():
     # args.work_dir = args.work_dir + '/'  + exp_name
 
     # modded for checking augmentation and corruption
-    aug_name = "augs-" + args.data_augs
+    if args.augmix:
+        aug_name = "augs-augmix"
+    else:
+        aug_name = "augs-" + args.data_augs
+        
     exp_name = env_name + '-' + aug_name+ '-s' + str(args.seed)
     args.work_dir = args.work_dir + '/'  + exp_name
 

@@ -278,7 +278,10 @@ def main():
     # args.work_dir = args.work_dir + '/'  + exp_name
 
     # modded for checking augmentation and corruption
-    aug_name = "augs-" + args.data_augs
+    if args.augmix:
+        aug_name = "augs-augmix"
+    else:
+        aug_name = "augs-" + args.data_augs
     exp_name = env_name + '-' + aug_name+ '-s' + str(args.seed)
     args.work_dir = args.work_dir + '/'  + exp_name
 
@@ -308,15 +311,26 @@ def main():
         obs_shape = env.observation_space.shape
         pre_aug_obs_shape = obs_shape
 
-    replay_buffer = utils.ReplayBuffer(
-        obs_shape=pre_aug_obs_shape,
-        action_shape=action_shape,
-        capacity=args.replay_buffer_capacity,
-        batch_size=args.batch_size,
-        device=device,
-        image_size=args.image_size,
-        pre_image_size=pre_image_size,
-    )
+    if args.augmix:
+        replay_buffer = utils.AugmixReplayBuffer(
+            obs_shape=pre_aug_obs_shape,
+            action_shape=action_shape,
+            capacity=args.replay_buffer_capacity,
+            batch_size=args.batch_size,
+            device=device,
+            image_size=args.image_size,
+            pre_image_size=pre_image_size,
+        )
+    else:
+        replay_buffer = utils.ReplayBuffer(
+            obs_shape=pre_aug_obs_shape,
+            action_shape=action_shape,
+            capacity=args.replay_buffer_capacity,
+            batch_size=args.batch_size,
+            device=device,
+            image_size=args.image_size,
+            pre_image_size=pre_image_size,
+        )
 
     agent = make_agent(
         obs_shape=obs_shape,
@@ -381,7 +395,11 @@ def main():
             done
         )
         episode_reward += reward
+
+        add_time0 = time.time()
         replay_buffer.add(obs, action, reward, next_obs, done_bool)
+        add_time1 = time.time()
+        # print("step", step, f"add {add_time1- add_time0}sec")
 
         obs = next_obs
         episode_step += 1

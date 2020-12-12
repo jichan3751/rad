@@ -22,16 +22,24 @@ IMAGE_SIZE = 84
 MEAN = [0.5] * 3
 STD = [0.5] * 3
 
+
+def normalize_chw(image):
+  """Normalize input image channel-wise to zero mean and unit variance."""    
+  mean, std = np.array(MEAN), np.array(STD)
+  image = (image - mean[:, None, None]) / std[:, None, None]
+  return image
+
 def normalize(image):
   """Normalize input image channel-wise to zero mean and unit variance."""
   image = image.transpose(2, 0, 1)  # Switch to channel-first
+    
   mean, std = np.array(MEAN), np.array(STD)
   image = (image - mean[:, None, None]) / std[:, None, None]
   return image.transpose(1, 2, 0)
 
 
 def apply_op(image, op, severity):
-  image = np.clip(image, 0, 255).astype(np.uint8)
+  image = np.clip(image*255., 0, 255).astype(np.uint8)
   pil_img = Image.fromarray(image)  # Convert to PIL.Image
   pil_img = op(pil_img, severity)
   return np.asarray(pil_img) / 255.
