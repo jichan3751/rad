@@ -73,7 +73,7 @@ def augment_and_mix(images, severity=3, width=1, depth=1, alpha=1., seed=0):
       mix = np.add(mix, ws[i] * normalize(image_aug), casting='no')
 
     mixed = (1 - m) * normalize(image) + m * mix
-    
+
     ret.append(torch.tensor(mixed).permute(2, 0, 1))
   return ret
 

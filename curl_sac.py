@@ -8,11 +8,11 @@ import time
 
 import utils
 from encoder import make_encoder
-import data_augs as rad 
+import data_augs as rad
 
 LOG_FREQ = 10000
 
-        
+
 def gaussian_logprob(noise, log_std):
     """Compute Gaussian log probability."""
     residual = (-0.5 * noise.pow(2) - log_std).sum(-1, keepdim=True)
@@ -195,7 +195,7 @@ class CURL(nn.Module):
 
         self.encoder = critic.encoder
 
-        self.encoder_target = critic_target.encoder 
+        self.encoder_target = critic_target.encoder
 
         self.W = nn.Parameter(torch.rand(z_dim, z_dim))
         self.output_type = output_type
@@ -327,7 +327,7 @@ class RadSacAgent(object):
         self.log_alpha.requires_grad = True
         # set target entropy to -|A|
         self.target_entropy = -np.prod(action_shape)
-        
+
         # optimizers
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(), lr=actor_lr, betas=(actor_beta, 0.999)
@@ -382,7 +382,7 @@ class RadSacAgent(object):
     def sample_action(self, obs):
         if obs.shape[-1] != self.image_size:
             obs = utils.center_crop_image(obs, self.image_size)
- 
+
         with torch.no_grad():
             obs = torch.FloatTensor(obs).to(self.device)
             obs = obs.unsqueeze(0)
@@ -426,7 +426,7 @@ class RadSacAgent(object):
             L.log('train_actor/target_entropy', self.target_entropy, step)
         entropy = 0.5 * log_std.shape[1] * \
             (1.0 + np.log(2 * np.pi)) + log_std.sum(dim=-1)
-        if step % self.log_interval == 0:                                    
+        if step % self.log_interval == 0:
             L.log('train_actor/entropy', entropy.mean(), step)
 
         # optimize the actor
@@ -446,8 +446,8 @@ class RadSacAgent(object):
         self.log_alpha_optimizer.step()
 
     def update_cpc(self, obs_anchor, obs_pos, cpc_kwargs, L, step):
-        
-        # time flips 
+
+        # time flips
         """
         time_pos = cpc_kwargs["time_pos"]
         time_anchor= cpc_kwargs["time_anchor"]
@@ -456,11 +456,11 @@ class RadSacAgent(object):
         """
         z_a = self.CURL.encode(obs_anchor)
         z_pos = self.CURL.encode(obs_pos, ema=True)
-        
+
         logits = self.CURL.compute_logits(z_a, z_pos)
         labels = torch.arange(logits.shape[0]).long().to(self.device)
         loss = self.cross_entropy_loss(logits, labels)
-        
+
         self.encoder_optimizer.zero_grad()
         self.cpc_optimizer.zero_grad()
         loss.backward()
@@ -485,7 +485,7 @@ class RadSacAgent(object):
 
         else:
             obs, action, reward, next_obs, not_done = replay_buffer.sample_proprio()
-    
+
         if step % self.log_interval == 0:
             L.log('train/batch_reward', reward.mean(), step)
 
@@ -505,7 +505,7 @@ class RadSacAgent(object):
                 self.critic.encoder, self.critic_target.encoder,
                 self.encoder_tau
             )
-        
+
         #if step % self.cpc_update_freq == 0 and self.encoder_type == 'pixel':
         #    obs_anchor, obs_pos = cpc_kwargs["obs_anchor"], cpc_kwargs["obs_pos"]
         #    self.update_cpc(obs_anchor, obs_pos,cpc_kwargs, L, step)
@@ -524,10 +524,21 @@ class RadSacAgent(object):
         )
 
     def load(self, model_dir, step):
-        self.actor.load_state_dict(
-            torch.load('%s/actor_%s.pt' % (model_dir, step))
-        )
-        self.critic.load_state_dict(
-            torch.load('%s/critic_%s.pt' % (model_dir, step))
-        )
- 
+        if torch.cuda.is_available():
+            self.actor.load_state_dict(
+                torch.load('%s/actor_%s.pt' % (model_dir, step))
+            )
+            self.critic.load_state_dict(
+                torch.load('%s/critic_%s.pt' % (model_dir, step))
+            )
+        else:
+            self.actor.load_state_dict(
+                torch.load('%s/actor_%s.pt' % (model_dir, step),
+                map_location=torch.device('cpu'))
+            )
+            self.critic.load_state_dict(
+                torch.load('%s/critic_%s.pt' % (model_dir, step),
+                map_location=torch.device('cpu'))
+            )
+
+

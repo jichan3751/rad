@@ -16,6 +16,7 @@ dependencies:
     - tb-nightly
     - imageio
     - imageio-ffmpeg
-    - torchvision
     - scikit-image
     - tabulate
+    - opencv-python
+    - pyvirtualdisplay

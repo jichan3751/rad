@@ -77,6 +77,10 @@ def parse_args():
     # data augs
     parser.add_argument('--data_augs', default='crop', type=str)
 
+    # corruption in eval
+    parser.add_argument('--cor_func', default='no_cor', type=str)
+    parser.add_argument('--cor_sev', default=1, type=int)
+
     # augmix
     parser.add_argument('--augmix', action='store_true', help='whether to use augmix')
     parser.add_argument('--jsd_lambda', default=0, type=float, help='augmix jsd loss lambda')
@@ -145,15 +149,15 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
         log_data[key][step]['env_step'] = step * args.action_repeat
 
         np.save(filename,log_data)
+        end_time = time.time
+        print(f"my_eval_{cor_func}_{cor_sev} : S {step} Mean {mean_ep_reward:.4f} Best {best_ep_reward:.4f} Std {std_ep_reward:.4f} took {took_time:.2f} sec")
 
     run_eval_loop(sample_stochastically=False)
     L.dump(step)
 
 
 def evaluate_corruptions(env, agent, video, num_episodes, L, step, args):
-    corruptions = ["gaussian_noise", "contrast"]
-    severities = [5,4,3,2,1]
-    severities = [1,2,3,4,5]
+
 
     def run_eval_loop2(sample_stochastically=True, cor_func = "no_cor", cor_sev = 1):
         cor = Corruptor(cor_func= cor_func, severity = cor_sev)
@@ -183,7 +187,6 @@ def evaluate_corruptions(env, agent, video, num_episodes, L, step, args):
                         action = agent.select_action(obs / 255.)
                 obs, reward, done, _ = env.step(action)
                 obs = cor.corrupt(obs) # added corruption after env
-                video.record(env)
                 episode_reward += reward
 
             all_ep_rewards.append(episode_reward)
@@ -196,14 +199,14 @@ def evaluate_corruptions(env, agent, video, num_episodes, L, step, args):
 
         return step, mean_ep_reward, best_ep_reward, std_ep_reward, end_time - start_time
         # hack to check only what I want..
-        
+    
+    cor_func = args.cor_func
+    cor_sev = args.cor_sev
 
-    (step, mean_ep_reward, best_ep_reward, std_ep_reward, took_time) = run_eval_loop2(sample_stochastically=False)
-    print(f"my_eval_{'no_cor'}_{1} : S {step} Mean {mean_ep_reward:.4f} Best {best_ep_reward:.4f} Std {std_ep_reward:.4f} took {took_time:.2f} sec")
-    for cor_func in corruptions:
-        for cor_sev in severities:
-            (step, mean_ep_reward, best_ep_reward, std_ep_reward, took_time) = run_eval_loop2(sample_stochastically=False, cor_func=cor_func, cor_sev= cor_sev)
-            print(f"my_eval_{cor_func}_{cor_sev} : S {step} Mean {mean_ep_reward:.4f} Best {best_ep_reward:.4f} Std {std_ep_reward:.4f} took {took_time:.2f} sec")
+    (step, mean_ep_reward, best_ep_reward, std_ep_reward, took_time) = run_eval_loop2(sample_stochastically=False, cor_func=cor_func, cor_sev= cor_sev)
+    print(f"my_eval_{cor_func}_{cor_sev} : S {step} Mean {mean_ep_reward:.4f} Best {best_ep_reward:.4f} Std {std_ep_reward:.4f} took {took_time:.2f} sec")
+
+    return {"step":step, "mean_ep_reward":mean_ep_reward, "best_ep_reward":best_ep_reward, "std_ep_reward":std_ep_reward}
 
 
 
@@ -286,6 +289,7 @@ def main():
     video_dir = utils.make_dir(os.path.join(args.work_dir, 'video'))
     model_dir = utils.make_dir(os.path.join(args.work_dir, 'model'))
     buffer_dir = utils.make_dir(os.path.join(args.work_dir, 'buffer'))
+    eval_dir = utils.make_dir(os.path.join(args.work_dir, 'eval'))
 
     video = VideoRecorder(video_dir if args.save_video else None)
 
@@ -331,61 +335,23 @@ def main():
     episode, episode_reward, done = 0, 0, True
     start_time = time.time()
 
+
+    results = []
+
     for step in range(args.num_train_steps):
         # evaluate agent periodically
-
+        
         if step % args.eval_freq == 0:
+            agent.load(model_dir, step)
+
             L.log('eval/episode', episode, step)
-            evaluate(env, agent, video, args.num_eval_episodes, L, step,args)
-            # evaluate_corruptions(env, agent, video, args.num_eval_episodes, L, step,args)
-            if args.save_model:
-                agent.save_curl(model_dir, step)
-                agent.save(model_dir, step)
-            if args.save_buffer:
-                replay_buffer.save(buffer_dir)
+            # evaluate(env, agent, video, args.num_eval_episodes, L, step,args)
+            res = evaluate_corruptions(env, agent, video, args.num_eval_episodes, L, step, args)
+            results.append(res)
 
-        if done:
-            if step > 0:
-                if step % args.log_interval == 0:
-                    L.log('train/duration', time.time() - start_time, step)
-                    L.dump(step)
-                start_time = time.time()
-            if step % args.log_interval == 0:
-                L.log('train/episode_reward', episode_reward, step)
-
-            obs = env.reset()
-            done = False
-            episode_reward = 0
-            episode_step = 0
-            episode += 1
-            if step % args.log_interval == 0:
-                L.log('train/episode', episode, step)
-
-        # sample action for data collection
-        if step < args.init_steps:
-            action = env.action_space.sample()
-        else:
-            with utils.eval_mode(agent):
-                action = agent.sample_action(obs / 255.)
-
-        # run training update
-        if step >= args.init_steps:
-            num_updates = 1
-            for _ in range(num_updates):
-                agent.update(replay_buffer, L, step)
-
-        next_obs, reward, done, _ = env.step(action)
-
-        # allow infinit bootstrap
-        done_bool = 0 if episode_step + 1 == env._max_episode_steps else float(
-            done
-        )
-        episode_reward += reward
-        replay_buffer.add(obs, action, reward, next_obs, done_bool)
-
-        obs = next_obs
-        episode_step += 1
-
+    import pickle
+    results_fname = os.path.join(eval_dir, f"{args.cor_func}{args.cor_sev}.pkl")
+    pickle.dump(results, open(results_fname, "wb"))
 
 if __name__ == '__main__':
     torch.multiprocessing.set_start_method('spawn')
