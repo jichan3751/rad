@@ -43,6 +43,7 @@ RUN apt-get update \
     xvfb \
     python-opengl \
     ffmpeg \
+    libmagickwand-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -84,7 +85,8 @@ RUN pip install \
     imageio-ffmpeg \
     scikit-image \
     tabulate \
-    pyvirtualdisplay==1.3.2
+    pyvirtualdisplay==1.3.2 \
+    Wand
 
 # install pip packages 2
 RUN pip install \

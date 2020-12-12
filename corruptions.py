@@ -12,9 +12,9 @@ import numpy as np
 import skimage as sk
 from skimage.filters import gaussian
 from io import BytesIO
-# from wand.image import Image as WandImage
-# from wand.api import library as wandlibrary
-# # import wand.color as WandColor
+from wand.image import Image as WandImage
+from wand.api import library as wandlibrary
+import wand.color as WandColor
 import ctypes
 from PIL import Image as PILImage
 import cv2
@@ -22,13 +22,68 @@ from scipy.ndimage import zoom as scizoom
 from scipy.ndimage.interpolation import map_coordinates
 import warnings
 
+warnings.simplefilter("ignore", UserWarning)
+
 def main():
+    import torchvision
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                        download=True)
+
+    img = trainset.data[0] # (32,32,3) image, 0 - 255 uint8
+
+    cor = Corruptor()
+
+    cor_funcs = list(cor.cor_funcs.keys())
+    cor_funcs = ["no_cor"] + cor_funcs
+    cor_sevs = [1,2,3,4,5]
+
+    print(img)
+    for cor_func in cor_funcs:
+        for cor_sev in cor_sevs:
+            print(cor_func, cor_sev)
+            cor = Corruptor(cor_func, cor_sev)
+            img2 = cor.corrupt(img)
+            print(img2)
+
+    # import ipdb; ipdb.set_trace()
 
     pass
 
 
 # copied from https://github.com/hendrycks/robustness/blob/master/ImageNet-C/create_c/make_cifar_c.py
 # assumes 0~255 range
+
+import warnings
+
+warnings.simplefilter("ignore", UserWarning)
+
+
+def disk(radius, alias_blur=0.1, dtype=np.float32):
+    if radius <= 8:
+        L = np.arange(-8, 8 + 1)
+        ksize = (3, 3)
+    else:
+        L = np.arange(-radius, radius + 1)
+        ksize = (5, 5)
+    X, Y = np.meshgrid(L, L)
+    aliased_disk = np.array((X ** 2 + Y ** 2) <= radius ** 2, dtype=dtype)
+    aliased_disk /= np.sum(aliased_disk)
+
+    # supersample disk to antialias
+    return cv2.GaussianBlur(aliased_disk, ksize=ksize, sigmaX=alias_blur)
+
+
+# Tell Python about the C method
+wandlibrary.MagickMotionBlurImage.argtypes = (ctypes.c_void_p,  # wand
+                                              ctypes.c_double,  # radius
+                                              ctypes.c_double,  # sigma
+                                              ctypes.c_double)  # angle
+
+
+# Extend wand.image.Image class to include method signature
+class MotionImage(WandImage):
+    def motion_blur(self, radius=0.0, sigma=0.0, angle=0.0):
+        wandlibrary.MagickMotionBlurImage(self.wand, radius, sigma, angle)
 
 # modification of https://github.com/FLHerne/mapgen/blob/master/diamondsquare.py
 def plasma_fractal(mapsize=256, wibbledecay=3):
@@ -399,7 +454,32 @@ def elastic_transform(image, severity=1):
 
 
 # /////////////// End Distortions ///////////////
+# import collections
+# d = collections.OrderedDict()
+# d['Gaussian Noise'] = gaussian_noise
+# d['Shot Noise'] = shot_noise
+# d['Impulse Noise'] = impulse_noise
+# d['Defocus Blur'] = defocus_blur
+# d['Glass Blur'] = glass_blur
+# d['Motion Blur'] = motion_blur
+# d['Zoom Blur'] = zoom_blur
+# d['Snow'] = snow
+# d['Frost'] = frost
+# d['Fog'] = fog
+# d['Brightness'] = brightness
+# d['Contrast'] = contrast
+# d['Elastic'] = elastic_transform
+# d['Pixelate'] = pixelate
+# d['JPEG'] = jpeg_compression
 
+# d['Speckle Noise'] = speckle_noise
+# d['Gaussian Blur'] = gaussian_blur
+# d['Spatter'] = spatter
+# d['Saturate'] = saturate
+
+
+# test_data = dset.CIFAR10('/share/data/vision-greg/cifarpy', train=False)
+convert_img = trn.Compose([trn.ToTensor(), trn.ToPILImage()])
 
 
 
@@ -407,7 +487,7 @@ class Corruptor(object):
     """
     docstring
     """
-    def __init__(self, cor_func, severity):
+    def __init__(self, cor_func="no_cor", severity=1):
         cor_funcs = {
             "no_cor":no_cor,
             "gaussian_noise": gaussian_noise,
@@ -431,15 +511,36 @@ class Corruptor(object):
         }
 
         assert cor_func in cor_funcs
+        self.cor_funcs = cor_funcs
         self.coruption_func = cor_funcs[cor_func]
         self.severity = severity
 
         
     def corrupt(self,x): # x: obs
-        
+        import ipdb; ipdb.set_trace()
+        assert x.shape[2] == 3 # in h,w,c format
+        x = convert_img(x)
         x = self.coruption_func(x, severity=self.severity)
-        x = x.astype('uint8') # rad agent requires this datatype
+        x = np.uint8(x) # rad agent requires this datatype
         return x
+
+    def corrupt_stacked_images(self,x, n_stack=3): # x: obs
+        # import ipdb; ipdb.set_trace()
+        assert x.shape[0] == 9 # 
+        c3,h,w = x.shape
+
+        x = x.reshape((-1,3,h,w)) # (3,c=3,h,w)
+        x = x.transpose((0,2,3,1)) #(3,h,w,c=3)
+        x2 = []
+        for img in x:
+            img = convert_img(img)
+            img = self.coruption_func(img, severity=self.severity)
+            img = np.uint8(img) # rad agent requires this datatype
+            x2.append(img)
+        x2 = np.stack(x2, axis=0) #(3,h,w,c=3)
+        x2 = x2.transpose((0,3, 1,2)) #(3,c=3,h,w)
+        x2 = x2.reshape((c3,h,w)) #(9,h,w)
+        return x2
         
 
 

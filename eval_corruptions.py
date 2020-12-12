@@ -168,7 +168,7 @@ def evaluate_corruptions(env, agent, video, num_episodes, L, step, args):
         all_ep_rewards = []
         for i in range(num_episodes):
             obs = env.reset()
-            obs = cor.corrupt(obs) # added corruption after env
+            obs = cor.corrupt_stacked_images(obs, args.frame_stack) # added corruption after env
             done = False
             episode_reward = 0
             while not done:
@@ -186,7 +186,7 @@ def evaluate_corruptions(env, agent, video, num_episodes, L, step, args):
                     else:
                         action = agent.select_action(obs / 255.)
                 obs, reward, done, _ = env.step(action)
-                obs = cor.corrupt(obs) # added corruption after env
+                obs = cor.corrupt_stacked_images(obs, args.frame_stack) # added corruption after env
                 episode_reward += reward
 
             all_ep_rewards.append(episode_reward)
@@ -346,7 +346,7 @@ def main():
         # evaluate agent periodically
         
         if step % args.eval_freq == 0:
-            agent.load(model_dir, step)
+            agent.load(model_dir, step, map_to_cpu=True)
 
             L.log('eval/episode', episode, step)
             # evaluate(env, agent, video, args.num_eval_episodes, L, step,args)

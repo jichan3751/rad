@@ -523,15 +523,8 @@ class RadSacAgent(object):
             self.CURL.state_dict(), '%s/curl_%s.pt' % (model_dir, step)
         )
 
-    def load(self, model_dir, step):
-        if torch.cuda.is_available():
-            self.actor.load_state_dict(
-                torch.load('%s/actor_%s.pt' % (model_dir, step))
-            )
-            self.critic.load_state_dict(
-                torch.load('%s/critic_%s.pt' % (model_dir, step))
-            )
-        else:
+    def load(self, model_dir, step, map_to_cpu=False):
+        if not torch.cuda.is_available() or map_to_cpu:
             self.actor.load_state_dict(
                 torch.load('%s/actor_%s.pt' % (model_dir, step),
                 map_location=torch.device('cpu'))
@@ -539,6 +532,13 @@ class RadSacAgent(object):
             self.critic.load_state_dict(
                 torch.load('%s/critic_%s.pt' % (model_dir, step),
                 map_location=torch.device('cpu'))
+            )
+        else:
+            self.actor.load_state_dict(
+                torch.load('%s/actor_%s.pt' % (model_dir, step))
+            )
+            self.critic.load_state_dict(
+                torch.load('%s/critic_%s.pt' % (model_dir, step))
             )
 
 
