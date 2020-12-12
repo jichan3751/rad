@@ -204,7 +204,7 @@ def evaluate_corruptions(env, agent, video, num_episodes, L, step, args):
     cor_sev = args.cor_sev
 
     (step, mean_ep_reward, best_ep_reward, std_ep_reward, took_time) = run_eval_loop2(sample_stochastically=False, cor_func=cor_func, cor_sev= cor_sev)
-    print(f"my_eval_{cor_func}_{cor_sev} : S {step} Mean {mean_ep_reward:.4f} Best {best_ep_reward:.4f} Std {std_ep_reward:.4f} took {took_time:.2f} sec")
+    print(f"my_eval_{cor_func}_{cor_sev} : S {step} EpMean {mean_ep_reward:.4f} EpBest {best_ep_reward:.4f} EpStd {std_ep_reward:.4f} took {took_time:.2f} sec")
 
     return {"step":step, "mean_ep_reward":mean_ep_reward, "best_ep_reward":best_ep_reward, "std_ep_reward":std_ep_reward}
 
@@ -337,7 +337,7 @@ def main():
 
 
     results = []
-
+    best_mean_reward = 0
     for step in range(args.num_train_steps):
         # evaluate agent periodically
         
@@ -347,7 +347,14 @@ def main():
             L.log('eval/episode', episode, step)
             # evaluate(env, agent, video, args.num_eval_episodes, L, step,args)
             res = evaluate_corruptions(env, agent, video, args.num_eval_episodes, L, step, args)
+            
+            if best_mean_reward < res['mean_ep_reward']:
+                best_mean_reward = res['mean_ep_reward']
+
+            res['best_overall'] = best_mean_reward
             results.append(res)
+
+    print(f"Best Mean overall:{best_mean_reward:.4f}")
 
     import pickle
     results_fname = os.path.join(eval_dir, f"{args.cor_func}{args.cor_sev}.pkl")
