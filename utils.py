@@ -405,7 +405,7 @@ class AugmixReplayBuffer(Dataset):
 
             # apply random augmentation here
             from augmix import augmentations, apply_op
-            obs = obs /255.
+            obs = obs
 
             depth = self.aug_depth
             c, h, w = obs.shape
@@ -457,64 +457,110 @@ class AugmixReplayBuffer(Dataset):
         obses = self.obses[idxs]
         next_obses = self.next_obses[idxs]
 
-        aug_obses = [ self.aug_obses[c_i][idxs] for c_i in range(self.aug_cache)]
-        aug_next_obses = [ self.aug_next_obses[c_i][idxs] for c_i in range(self.aug_cache)]
+        aug_obses = np.array([ self.aug_obses[c_i][idxs] for c_i in range(self.aug_cache)])
+        aug_next_obses = np.array([ self.aug_next_obses[c_i][idxs] for c_i in range(self.aug_cache)])
+
 
         # import ipdb; ipdb.set_trace()
 
         # augmix mixing part
+
         def get_mixed_obs(obses, aug_obses):
+            
             # this part is slow...
             # 1) try batch wighted sum emthods numpy
             # 2) maye also use cuda()
             # * why was 0 appearing in augmented obs? take a look
-            from augmix import normalize_chw
+            # from augmix import normalize_chw
 
             width = self.aug_width
             alpha = self.aug_alpha
 
-            c, h, w = obses[0].shape
+            n_images = len(obses) 
+            c, h, w = obses[0].shape # c= 9
 
-            t00= time.time()
+            t00 = time.time()
 
-            obs_images = obses.reshape((-1,3,h,w))
-            aug_obs_images = [ aug_obses1.reshape((-1,3,h,w)) for aug_obses1 in aug_obses]
+            # np.random.seed(0)
+            wss = np.float32(np.random.dirichlet([alpha] * width, size = n_images)) # (bs, width) , each row sums up to 1
+            ms = np.float32(np.random.beta(alpha, alpha, size = n_images)) # (n_images,), 0~ 1 
+            cache_choices = np.array([ np.random.choice(len(aug_obses), width, replace=False) for _ in range(n_images)]) # (bs, width)
 
-            mixed_images = []
+            t01 = time.time()
 
-            t01= time.time()
+            mixed_obses = []
 
-            for i in range(obs_images.shape[0]):
-                ws = np.float32(np.random.dirichlet([alpha] * width))
-                m = np.float32(np.random.beta(alpha, alpha))
-                mix = np.zeros((3, h, w)).astype(float)
-
-                cache_indices = np.random.choice(self.aug_cache, size= width, replace=False)
+            for i in range(n_images):
+                ws = wss[i]
+                m = ms[i]
+                mix = np.zeros((9, h, w)).astype(float)
+                cache_indices = cache_choices[i]
 
                 for w_i in range(width):
-                    image_aug = aug_obs_images[cache_indices[w_i]][i]
-                    mix = np.add(mix, ws[w_i] * normalize_chw(image_aug), casting='no')
+                    image_aug = np.float32(aug_obses[cache_indices[w_i]][i])
+                    mix = np.add(mix, ws[w_i] * image_aug)
 
-                image = obs_images[i]
-                mixed = (1-m) * normalize_chw(image) + m * mix
+                image = obses[i]
+                mixed = (1-m) * image + m * mix
 
-                mixed_images.append(mixed)
-            t02= time.time()
-            mixed_images = np.stack(mixed_images, axis=0)
-            mixed_images = mixed_images.reshape((-1,9,h,w))
-            t03= time.time()
+                mixed_obses.append(mixed)
+            mixed_obses = np.stack(mixed_obses, axis=0)
+            
+            t02 = time.time()
+            print( t01-t00,t02-t01)
 
-            # print( t01-t00,t02-t01, t03-t02)
+            return mixed_obses
 
-            return mixed_images
+        def get_mixed_obs_fast(obses, aug_obses):
 
-        mixed_obses = get_mixed_obs(obses, aug_obses)
-        mixed_next_obses = get_mixed_obs(next_obses, aug_next_obses)
+            # same as get_mixed_obs() but uses torch cuda
 
-        clean_obses = torch.as_tensor(obses, device=self.device).float()
-        clean_next_obses = torch.as_tensor(next_obses, device=self.device).float()
-        obses = torch.as_tensor(mixed_obses, device=self.device).float()
-        next_obses = torch.as_tensor(mixed_next_obses, device=self.device).float()
+            # obses : torch tensor , aug_obses: np array
+            
+            width = self.aug_width
+            alpha = self.aug_alpha
+
+            n_images = len(obses) 
+            c, h, w = obses[0].shape # c= 9
+
+            t00 = time.time()
+
+            # np.random.seed(0)
+            wss = np.float32(np.random.dirichlet([alpha] * width, size = n_images)) # (bs, width) , each row sums up to 1
+            ms = np.float32(np.random.beta(alpha, alpha, size = n_images)) # (n_images,), 0~ 1 
+            cache_choices = np.array([ np.random.choice(len(aug_obses), width, replace=False) for _ in range(n_images)]) # (bs, width)
+            
+            wss = torch.tensor(wss).to(self.device) # (bs, width) 
+            ms = torch.tensor(ms).to(self.device) # (n_images,), 0~ 1 
+
+            obses = torch.tensor(obses).to(self.device)
+            aug_obses2 = np.array([ aug_obses[cache_choices[i],i,:,:,:] for i in range(n_images)])
+            aug_obses2 = torch.tensor(aug_obses2).to(self.device) # shape (bs, width,c, h, w)
+
+            t01 = time.time()
+
+            mixed_obses1 = ( wss[:,:,None,None,None] * aug_obses2 ).sum(dim=1)
+            mixed_obses2 = (1-ms)[:,None,None,None] * obses + (ms)[:,None,None,None]* mixed_obses1
+            
+            return mixed_obses2
+
+        # mixed_obses = get_mixed_obs(obses, aug_obses)
+
+        t0 = time.time()
+        obses = torch.as_tensor(obses, device=self.device)
+        mixed_obses = get_mixed_obs_fast(obses, aug_obses)
+        t1 = time.time()
+        next_obses = torch.as_tensor(next_obses, device=self.device)
+        mixed_next_obses = get_mixed_obs_fast(next_obses, aug_next_obses)
+        t2 = time.time()
+
+        # import ipdb; ipdb.set_trace()
+        # print(f"get_mixed_obs {t1-t0:.3f}sec, {t2-t1:.3f}sec ")
+
+        clean_obses = obses
+        clean_next_obses = next_obses
+        obses = mixed_obses
+        next_obses = mixed_next_obses
 
         actions = torch.as_tensor(self.actions[idxs], device=self.device)
         rewards = torch.as_tensor(self.rewards[idxs], device=self.device)
@@ -524,5 +570,8 @@ class AugmixReplayBuffer(Dataset):
         clean_obses = clean_obses / 255.
         next_obses = next_obses / 255.
         clean_next_obses = clean_next_obses / 255.
+
+        t3 = time.time()
+        # print(f"misc {t3-t2:.3f}sec")
 
         return obses, clean_obses, actions, rewards, next_obses,clean_next_obses, not_dones

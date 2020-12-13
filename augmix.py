@@ -23,10 +23,10 @@ MEAN = [0.5] * 3
 STD = [0.5] * 3
 
 
-def normalize_chw(image):
+def normalize2(image):
   """Normalize input image channel-wise to zero mean and unit variance."""    
-  mean, std = np.array(MEAN), np.array(STD)
-  image = (image - mean[:, None, None]) / std[:, None, None]
+  mean, std = 0.5, 0.5
+  image = (image - mean) / std
   return image
 
 def normalize(image):
@@ -39,7 +39,7 @@ def normalize(image):
 
 
 def apply_op(image, op, severity):
-  image = np.clip(image*255., 0, 255).astype(np.uint8)
+  image = np.clip(image, 0, 255).astype(np.uint8)
   pil_img = Image.fromarray(image)  # Convert to PIL.Image
   pil_img = op(pil_img, severity)
   return np.asarray(pil_img) / 255.

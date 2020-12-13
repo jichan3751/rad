@@ -1,9 +1,9 @@
-mkdir -p logs
-
 # run evaluation loop
 export PYTHONUNBUFFERED=1
 export CUDA_VISIBLE_DEVICES=
 export OMP_NUM_THREADS=2
+
+mkdir -p logs
 declare -a augs=("no_aug" "crop")
 declare -a cors=(
     "no_cor"
